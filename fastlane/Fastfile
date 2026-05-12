@@ -50,6 +50,75 @@ platform :mac do
     end
   end
 
+  desc "Submit latest build for Beta App Review"
+  lane :submit_beta_review do
+    require 'spaceship'
+    token = Spaceship::ConnectAPI::Token.create(
+      key_id: "XG3FW9LT9Q",
+      issuer_id: "178bab61-1c45-4f62-9525-55f8ed15a98d",
+      filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_XG3FW9LT9Q.p8")
+    )
+    Spaceship::ConnectAPI.token = token
+    app = Spaceship::ConnectAPI::App.find("com.spencerhill.fullbatteryalert")
+    build = Spaceship::ConnectAPI::Build.all(app_id: app.id, sort: "-uploadedDate", limit: 1).first
+    UI.message("Submitting build #{build.version} for beta review")
+    # Beta app localization (description, feedback email)
+    begin
+      Spaceship::ConnectAPI.post_beta_app_localizations(app_id: app.id, attributes: {
+        locale: "en-US",
+        description: "A tiny menu bar app that alerts you when your Mac's battery hits configurable thresholds (default 95% and 100%) so you never overcharge while plugged in.",
+        feedbackEmail: "thespencerhill@gmail.com",
+        marketingUrl: nil,
+        privacyPolicyUrl: nil,
+        tvOsPrivacyPolicy: nil
+      })
+    rescue => e
+      UI.message("beta app localization: #{e.message}")
+    end
+    # Beta app review details (contact info)
+    begin
+      Spaceship::ConnectAPI.patch_beta_app_review_detail(app_id: app.id, attributes: {
+        contactFirstName: "Spencer",
+        contactLastName: "Hill",
+        contactEmail: "thespencerhill@gmail.com",
+        contactPhone: "5035550100",
+        demoAccountRequired: false
+      })
+    rescue => e
+      UI.message("beta review detail: #{e.message}")
+    end
+    # Build localization (What to Test)
+    begin
+      Spaceship::ConnectAPI.post_beta_build_localizations(build_id: build.id, attributes: { locale: "en-US", whatsNew: "Initial public TestFlight." })
+    rescue => e
+      UI.message("localization: #{e.message}")
+    end
+    Spaceship::ConnectAPI.post_beta_app_review_submissions(build_id: build.id)
+    UI.success("Submitted for Beta App Review")
+  end
+
+  desc "Invite external tester by email"
+  lane :invite do |options|
+    require 'spaceship'
+    token = Spaceship::ConnectAPI::Token.create(
+      key_id: "XG3FW9LT9Q",
+      issuer_id: "178bab61-1c45-4f62-9525-55f8ed15a98d",
+      filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_XG3FW9LT9Q.p8")
+    )
+    Spaceship::ConnectAPI.token = token
+    app = Spaceship::ConnectAPI::App.find("com.spencerhill.fullbatteryalert")
+    email = options[:email] or UI.user_error!("pass email:...")
+    first = options[:first] || email.split("@").first.capitalize
+    last = options[:last] || "Tester"
+    group = app.get_beta_groups.find { |g| g.name == "Internal Testers" }  # external group from earlier
+    UI.message("Adding #{email} to #{group.name} (#{group.id})")
+    Spaceship::ConnectAPI.post_beta_tester_assignment(
+      beta_group_ids: [group.id],
+      attributes: { email: email, firstName: first, lastName: last }
+    )
+    UI.success("Invited #{email}")
+  end
+
   desc "Try promoting beta group to internal"
   lane :promote_internal do
     require 'spaceship'
