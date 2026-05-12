@@ -20,13 +20,14 @@ enum EnergyParser {
 
     static func parse(_ output: String) -> [RawProcess] {
         var rows: [RawProcess] = []
-        var seenHeader = false
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if !seenHeader {
-                if trimmed.hasPrefix("PID") && trimmed.contains("POWER") {
-                    seenHeader = true
-                }
+            // `top -l 2` prints two samples back-to-back. Each sample has its
+            // own "PID ... POWER" column header. Only the second sample has
+            // meaningful POWER values, so reset on every header to keep only
+            // the most recent batch.
+            if trimmed.hasPrefix("PID") && trimmed.contains("POWER") {
+                rows.removeAll(keepingCapacity: true)
                 continue
             }
             if trimmed.isEmpty { continue }
@@ -69,8 +70,17 @@ final class EnergyMonitor: ObservableObject {
     }
 
     private func refresh() {
-        let raw = Self.runTop()
-        let parsed = EnergyParser.parse(raw)
+        // `top -l 2` blocks ~1s between samples, so run it off the main actor;
+        // grouping uses NSRunningApplication which is main-actor, so hop back
+        // to main once the subprocess returns and publish from there.
+        Task.detached(priority: .utility) { [weak self] in
+            let raw = Self.runTop()
+            let parsed = EnergyParser.parse(raw)
+            await self?.publish(parsed: parsed)
+        }
+    }
+
+    private func publish(parsed: [EnergyParser.RawProcess]) {
         let grouped = Self.group(parsed)
         let filtered = grouped
             .filter { $0.powerImpact > significanceThreshold }
@@ -79,10 +89,14 @@ final class EnergyMonitor: ObservableObject {
         topApps = Array(filtered)
     }
 
-    private static func runTop() -> String {
+    nonisolated private static func runTop() -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/top")
-        process.arguments = ["-l", "1", "-stats", "pid,command,power", "-o", "power", "-n", "20"]
+        // -l 2 takes two samples ~1s apart. POWER is "energy impact since the
+        // previous sample", so the first sample reports 0.0 for everything;
+        // only the second sample has real numbers. Without two samples the
+        // entire list comes back empty after threshold filtering.
+        process.arguments = ["-l", "2", "-stats", "pid,command,power", "-o", "power", "-n", "20"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
