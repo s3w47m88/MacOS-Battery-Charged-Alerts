@@ -14,6 +14,7 @@ struct FullBatteryAlertApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = AppSettings()
     private let battery = BatteryMonitor()
+    private let energy = EnergyMonitor()
 
     private var statusItem: NSStatusItem!
     private var settingsPopover: NSPopover!
@@ -65,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: SettingsView(
                 settings: settings,
                 battery: battery,
+                energy: energy,
                 onTestAlert: { [weak self] in self?.presentAlertPopover(threshold: 100, percentage: self?.battery.percentage ?? 100) }
             )
         )
@@ -93,8 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         if settingsPopover.isShown {
             settingsPopover.performClose(nil)
+            energy.stop()
         } else {
             alertPopover.performClose(nil)
+            energy.start()
             settingsPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             settingsPopover.contentViewController?.view.window?.makeKey()
         }

@@ -4,8 +4,10 @@ import AppKit
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var battery: BatteryMonitor
+    @ObservedObject var energy: EnergyMonitor
     var onTestAlert: () -> Void = {}
     @State private var newThreshold: Double = 90
+    @State private var hintMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -46,9 +48,13 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("No Apps Using Significant Energy")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            EnergyListView(monitor: energy, onSelect: handleSelect)
+            if let hint = hintMessage {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
+            }
 
             Divider()
 
@@ -130,6 +136,18 @@ struct SettingsView: View {
             return "Fully charged"
         }
         return nil
+    }
+
+    private func handleSelect(_ app: AppEnergy) {
+        switch AppDrillIn.openResourceMonitor(for: app) {
+        case .opened:
+            hintMessage = nil
+        case .hint(let message):
+            hintMessage = message
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                if hintMessage == message { hintMessage = nil }
+            }
+        }
     }
 
     private func formatMinutes(_ m: Int) -> String {
