@@ -1,0 +1,74 @@
+default_platform(:mac)
+
+API_KEY = lambda do
+  app_store_connect_api_key(
+    key_id: "XG3FW9LT9Q",
+    issuer_id: "178bab61-1c45-4f62-9525-55f8ed15a98d",
+    key_filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_XG3FW9LT9Q.p8"),
+    in_house: false
+  )
+end
+
+platform :mac do
+  desc "Create app record in App Store Connect via Spaceship"
+  lane :create_app do
+    require 'spaceship'
+    token = Spaceship::ConnectAPI::Token.create(
+      key_id: "XG3FW9LT9Q",
+      issuer_id: "178bab61-1c45-4f62-9525-55f8ed15a98d",
+      filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_XG3FW9LT9Q.p8")
+    )
+    Spaceship::ConnectAPI.token = token
+
+    bundle_id = "com.spencerhill.fullbatteryalert"
+    existing_bid = Spaceship::ConnectAPI::BundleId.all(filter: { identifier: bundle_id }).first
+    if existing_bid
+      UI.message("Bundle ID #{bundle_id} already registered")
+    else
+      UI.message("Registering bundle ID #{bundle_id}")
+      Spaceship::ConnectAPI::BundleId.create(
+        name: "MacOS Fully Battery Alert",
+        platform: Spaceship::ConnectAPI::BundleIdPlatform::MAC_OS,
+        identifier: bundle_id
+      )
+    end
+
+    existing_app = Spaceship::ConnectAPI::App.find(bundle_id)
+    if existing_app
+      UI.success("App already exists: #{existing_app.name} (id=#{existing_app.id})")
+    else
+      UI.message("Creating ASC app record")
+      app = Spaceship::ConnectAPI::App.create(
+        name: "MacOS Fully Battery Alert",
+        version_string: "0.1.0",
+        sku: "fullbatteryalert001",
+        primary_locale: "en-US",
+        bundle_id: bundle_id,
+        platforms: [Spaceship::ConnectAPI::Platform::MAC_OS]
+      )
+      UI.success("Created: #{app.name} (id=#{app.id})")
+    end
+  end
+
+  desc "Build and upload to TestFlight"
+  lane :beta do
+    build_mac_app(
+      project: "FullBatteryAlert.xcodeproj",
+      scheme: "FullBatteryAlert",
+      configuration: "Release",
+      export_method: "app-store",
+      export_options: {
+        provisioningProfiles: {
+          "com.spencerhill.fullbatteryalert" => "match AppStore com.spencerhill.fullbatteryalert"
+        }
+      },
+      output_directory: "build/fastlane",
+      output_name: "MacOS Fully Battery Alert"
+    )
+    upload_to_testflight(
+      api_key: API_KEY.call,
+      pkg: "build/fastlane/MacOS Fully Battery Alert.pkg",
+      skip_waiting_for_build_processing: true
+    )
+  end
+end

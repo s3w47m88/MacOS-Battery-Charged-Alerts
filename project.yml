@@ -1,0 +1,39 @@
+name: FullBatteryAlert
+options:
+  bundleIdPrefix: com.spencerhill
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: VP38993WK6
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+targets:
+  FullBatteryAlert:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/FullBatteryAlert
+    info:
+      path: Sources/FullBatteryAlert/Info.plist
+      properties:
+        CFBundleDisplayName: MacOS Fully Battery Alert
+        CFBundleName: MacOS Fully Battery Alert
+        LSUIElement: YES
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "MIT License"
+    entitlements:
+      path: Sources/FullBatteryAlert/FullBatteryAlert.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spencerhill.fullbatteryalert
+        PRODUCT_NAME: "MacOS Fully Battery Alert"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_KEY_LSUIElement: YES

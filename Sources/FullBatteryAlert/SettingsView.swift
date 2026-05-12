@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var battery: BatteryMonitor
+    var onTestAlert: () -> Void = {}
     @State private var newThreshold: Double = 90
 
     var body: some View {
@@ -56,6 +57,7 @@ struct SettingsView: View {
             Divider()
 
             HStack {
+                Button("Send test alert") { onTestAlert() }
                 Spacer()
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)

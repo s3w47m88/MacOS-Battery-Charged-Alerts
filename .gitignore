@@ -5,3 +5,4 @@ build/
 *.xcodeproj/
 *.xcworkspace/
 Package.resolved
+FullBatteryAlert.xcodeproj/
