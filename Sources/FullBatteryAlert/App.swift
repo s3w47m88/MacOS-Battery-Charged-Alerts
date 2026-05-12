@@ -80,17 +80,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
             .applying(.init(scale: .medium))
-        let suffix = (battery.isCharging || battery.isPluggedIn) ? ".bolt" : ""
-        let primaryName = "battery.\(bucket)percent\(suffix)"
-        let img = NSImage(systemSymbolName: primaryName, accessibilityDescription: "Battery \(pct)%")?
-            .withSymbolConfiguration(config)
-            ?? NSImage(systemSymbolName: "battery.\(bucket)percent", accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-        img?.isTemplate = true
-        button.image = img
+        // Always use the plain percent variant for accurate fill, then overlay a
+        // bolt manually when charging. The SF Symbol "battery.XXpercent.bolt"
+        // variants don't preserve the fill bar — they replace it with the bolt —
+        // so direct use makes the charging icon look identical at every level.
+        guard let base = NSImage(systemSymbolName: "battery.\(bucket)percent", accessibilityDescription: "Battery \(pct)%")?
+            .withSymbolConfiguration(config) else { return }
+        let final = (battery.isCharging || battery.isPluggedIn)
+            ? composeBatteryWithBolt(base: base) ?? base
+            : base
+        final.isTemplate = true
+        button.image = final
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleNone
         button.toolTip = "\(pct)%" + (battery.isCharging ? " (charging)" : battery.isPluggedIn ? " (plugged in)" : "")
+    }
+
+    private func composeBatteryWithBolt(base: NSImage) -> NSImage? {
+        let boltConfig = NSImage.SymbolConfiguration(pointSize: 9, weight: .heavy)
+        guard let bolt = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(boltConfig) else { return nil }
+        let size = base.size
+        let composed = NSImage(size: size)
+        composed.lockFocus()
+        base.draw(at: .zero, from: NSRect(origin: .zero, size: size), operation: .sourceOver, fraction: 1.0)
+        let boltSize = bolt.size
+        let origin = NSPoint(
+            x: (size.width - boltSize.width) / 2.0,
+            y: (size.height - boltSize.height) / 2.0 - 0.5
+        )
+        // Knock out a bolt-shaped notch in the fill so the bolt stays legible.
+        NSGraphicsContext.current?.compositingOperation = .destinationOut
+        bolt.draw(at: origin, from: NSRect(origin: .zero, size: boltSize), operation: .destinationOut, fraction: 1.0)
+        // Redraw a slightly inset bolt as the visible glyph.
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        bolt.draw(at: origin, from: NSRect(origin: .zero, size: boltSize), operation: .sourceOver, fraction: 1.0)
+        composed.unlockFocus()
+        return composed
     }
 
     @objc private func toggleSettings(_ sender: Any?) {
