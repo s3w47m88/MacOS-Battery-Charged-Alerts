@@ -15,11 +15,12 @@ enum BatteryIconRenderer {
         let percentage = max(0, min(100, pct))
         let image = NSImage(size: totalSize, flipped: false) { _ in
             drawBatteryShape()
-            drawFill(percentage: percentage)
             if isCharging || isPluggedIn {
-                punchBolt()
+                drawFillWithBolt(percentage: percentage)
             } else if showPercentage {
-                punchPercent(percentage)
+                drawFillWithPercent(percentage: percentage)
+            } else {
+                drawFill(percentage: percentage)
             }
             return true
         }
@@ -70,20 +71,51 @@ enum BatteryIconRenderer {
         NSBezierPath(roundedRect: fillRect, xRadius: 1.5, yRadius: 1.5).fill()
     }
 
-    private static func punchBolt() {
+    private static func drawFillWithBolt(percentage: Int) {
+        // Same trick as drawFillWithPercent: draw the bolt as solid black, then
+        // XOR a black fill rect on top so within the charged region the bolt
+        // becomes transparent (reading as menu-bar color against the black
+        // fill) while outside the fill it stays solid black.
         let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .black)
         guard let bolt = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(config) else { return }
-        let origin = NSPoint(
+        let boltOrigin = NSPoint(
             x: (bodySize.width - bolt.size.width) / 2.0,
             y: (bodySize.height - bolt.size.height) / 2.0
         )
-        bolt.draw(at: origin, from: NSRect(origin: .zero, size: bolt.size),
-                  operation: .destinationOut, fraction: 1.0)
+        bolt.draw(at: boltOrigin, from: NSRect(origin: .zero, size: bolt.size),
+                  operation: .sourceOver, fraction: 1.0)
+
+        let pct = max(0, min(100, percentage))
+        guard pct > 0 else { return }
+        let interior = NSRect(
+            x: stroke / 2 + innerInset,
+            y: stroke / 2 + innerInset,
+            width: bodySize.width - stroke - innerInset * 2,
+            height: bodySize.height - stroke - innerInset * 2
+        )
+        let fillWidth = interior.width * CGFloat(pct) / 100.0
+        let fillRect = NSRect(
+            x: interior.minX,
+            y: interior.minY,
+            width: fillWidth,
+            height: interior.height
+        )
+        guard let ctx = NSGraphicsContext.current else { return }
+        ctx.saveGraphicsState()
+        ctx.compositingOperation = .xor
+        NSColor.black.setFill()
+        NSBezierPath(roundedRect: fillRect, xRadius: 1.5, yRadius: 1.5).fill()
+        ctx.restoreGraphicsState()
     }
 
-    private static func punchPercent(_ percentage: Int) {
-        // Punch the digits out of the fill so they read against the menu bar.
+    private static func drawFillWithPercent(percentage: Int) {
+        // Draw digits as solid black across the interior, then XOR a black
+        // fill rectangle on top so that within the filled (charged) region the
+        // alpha is inverted: digits become transparent and the background
+        // becomes opaque. Outside the fill, the digits remain solid black.
+        // Net effect: digits are visible on both sides of the charge line and
+        // appear inverted on the charged side.
         let font = NSFont.systemFont(ofSize: 8, weight: .heavy)
         let text = "\(percentage)"
         let attrs: [NSAttributedString.Key: Any] = [
@@ -92,15 +124,32 @@ enum BatteryIconRenderer {
         ]
         let str = NSAttributedString(string: text, attributes: attrs)
         let textSize = str.size()
-        let origin = NSPoint(
+        let textOrigin = NSPoint(
             x: (bodySize.width - textSize.width) / 2.0,
             y: (bodySize.height - textSize.height) / 2.0
         )
-        // Save state, switch to destinationOut so the rasterized text becomes a hole.
+        str.draw(at: textOrigin)
+
+        let pct = max(0, min(100, percentage))
+        guard pct > 0 else { return }
+        let interior = NSRect(
+            x: stroke / 2 + innerInset,
+            y: stroke / 2 + innerInset,
+            width: bodySize.width - stroke - innerInset * 2,
+            height: bodySize.height - stroke - innerInset * 2
+        )
+        let fillWidth = interior.width * CGFloat(pct) / 100.0
+        let fillRect = NSRect(
+            x: interior.minX,
+            y: interior.minY,
+            width: fillWidth,
+            height: interior.height
+        )
         guard let ctx = NSGraphicsContext.current else { return }
         ctx.saveGraphicsState()
-        ctx.compositingOperation = .destinationOut
-        str.draw(at: origin)
+        ctx.compositingOperation = .xor
+        NSColor.black.setFill()
+        NSBezierPath(roundedRect: fillRect, xRadius: 1.5, yRadius: 1.5).fill()
         ctx.restoreGraphicsState()
     }
 }
