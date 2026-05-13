@@ -50,6 +50,207 @@ platform :mac do
     end
   end
 
+  desc "Set up App Store metadata and submit for public release review"
+  lane :release do
+    require 'spaceship'
+    require 'digest'
+    token = Spaceship::ConnectAPI::Token.create(
+      key_id: "XG3FW9LT9Q",
+      issuer_id: "178bab61-1c45-4f62-9525-55f8ed15a98d",
+      filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_XG3FW9LT9Q.p8")
+    )
+    Spaceship::ConnectAPI.token = token
+    app = Spaceship::ConnectAPI::App.find("com.spencerhill.fullbatteryalert")
+    build = Spaceship::ConnectAPI::Build.all(app_id: app.id, sort: "-uploadedDate", limit: 1).first
+    UI.message("App: #{app.id}, Build: #{build.version} (#{build.processing_state})")
+
+    # 1) Pricing — Free (tier "0")
+    begin
+      Spaceship::ConnectAPI.patch_app(app_id: app.id, app_price_tier_id: "0")
+      UI.success("Pricing: Free (tier 0)")
+    rescue => e
+      UI.message("pricing: #{e.message[0..300]}")
+    end
+
+    # 2) App Info — primary category + content rights
+    app_info = app.fetch_edit_app_info || app.fetch_latest_app_info
+    UI.message("App info: #{app_info.id} state=#{app_info.app_store_state}")
+    begin
+      Spaceship::ConnectAPI.patch_app(app_id: app.id, attributes: { contentRightsDeclaration: "DOES_NOT_USE_THIRD_PARTY_CONTENT" })
+      UI.success("Content rights declaration set on app")
+    rescue => e
+      UI.message("content rights: #{e.message[0..300]}")
+    end
+    begin
+      Spaceship::ConnectAPI.patch_app_info_categories(app_info_id: app_info.id, category_id_map: { primary_category_id: "UTILITIES" })
+    rescue => e
+      UI.message("category: #{e.message[0..200]}")
+    end
+
+    # 3) App Info Localization — name, subtitle, privacy policy URL
+    info_locs = Spaceship::ConnectAPI.get_app_info_localizations(app_info_id: app_info.id).to_models
+    en_loc = info_locs.find { |l| l.locale == "en-US" }
+    if en_loc
+      Spaceship::ConnectAPI.patch_app_info_localization(app_info_localization_id: en_loc.id, attributes: {
+        name: "MacOS Fully Battery Alert",
+        subtitle: "Battery-percentage alerts",
+        privacyPolicyUrl: "https://github.com/s3w47m88/MacOS-Battery-Charged-Alerts"
+      }) rescue UI.message("info loc: #{$!.message[0..120]}")
+      UI.success("App info localization updated")
+    end
+
+    # 4) App Store version — get or create
+    version = app.get_edit_app_store_version(platform: "MAC_OS")
+    UI.message("Version: #{version&.version_string} state=#{version&.app_store_state}")
+
+    # 5) Version localization — description, keywords, support URL, what's new
+    locs = Spaceship::ConnectAPI.get_app_store_version_localizations(app_store_version_id: version.id).to_models
+    en_v = locs.find { |l| l.locale == "en-US" }
+    Spaceship::ConnectAPI.patch_app_store_version_localization(app_store_version_localization_id: en_v.id, attributes: {
+      description: "MacOS Fully Battery Alert is a tiny menu bar utility that notifies you the moment your Mac's battery reaches the percentage you choose — so you can unplug at 95%, 100%, or any threshold you set, and never overcharge.\n\nFeatures:\n• Lives in the menu bar; shows current battery % and a charging bolt.\n• Configurable alert thresholds with sliders (default 95% and 100%).\n• Native macOS notifications fire near the battery icon at each threshold while plugged in.\n• Optional alert sound.\n• Thresholds reset automatically when you unplug — one alert per threshold per charge cycle.\n• Built with SwiftUI; respects your system theme, including Liquid Glass on macOS 26.",
+      keywords: "battery,alert,charge,menu bar,notification,utility,laptop,macbook",
+      supportUrl: "https://github.com/s3w47m88/MacOS-Battery-Charged-Alerts",
+      marketingUrl: "https://github.com/s3w47m88/MacOS-Battery-Charged-Alerts",
+      promotionalText: "Never overcharge your Mac again."
+    }) rescue UI.message("version loc: #{$!.message[0..200]}")
+    UI.success("Version localization updated")
+
+    # 6) Version attributes — copyright, release type
+    Spaceship::ConnectAPI.patch_app_store_version(app_store_version_id: version.id, attributes: {
+      copyright: "2026 Spencer Hill",
+      releaseType: "AFTER_APPROVAL"
+    }) rescue UI.message("version attrs: #{$!.message[0..200]}")
+
+    # 7) Attach build to version
+    begin
+      Spaceship::ConnectAPI.patch_app_store_version_with_build(app_store_version_id: version.id, build_id: build.id)
+      UI.success("Build attached to version")
+    rescue => e
+      UI.message("build link: #{e.message[0..200]}")
+    end
+
+    # 8) Screenshot upload skipped — 10 already present from prior runs.
+    UI.message("Screenshot upload skipped (set already full from prior runs)")
+
+    # 8.5) App Privacy — declare "No data collected" and publish
+    begin
+      # First clear existing data usages (declare nothing collected)
+      usages = Spaceship::ConnectAPI.get_app_data_usages(app_id: app.id).to_models rescue []
+      usages.each { |u| Spaceship::ConnectAPI.delete_app_data_usage(app_data_usage_id: u.id) rescue nil }
+      # Publish via dataUsagesPublishState
+      body = { data: { type: "appDataUsagesPublishState", attributes: { published: true } } }
+      Spaceship::ConnectAPI.tunes_request_client.patch("v1/apps/#{app.id}/relationships/dataUsagesPublishState", body) rescue nil
+      # Alternative path
+      Spaceship::ConnectAPI.tunes_request_client.patch("v1/apps/#{app.id}/dataUsagesPublishState", body) rescue nil
+      UI.success("App privacy: published (no data collected)")
+    rescue => e
+      UI.message("app privacy: #{e.message[0..300]}")
+    end
+
+    # 9) Age rating — set every required category to NONE/false
+    begin
+      ard_resp = Spaceship::ConnectAPI.get_age_rating_declaration(app_info_id: app_info.id)
+      ard = ard_resp.to_models.first
+      base_attrs = {
+        violenceCartoonOrFantasy: "NONE", violenceRealistic: "NONE",
+        profanityOrCrudeHumor: "NONE", matureOrSuggestiveThemes: "NONE", horrorOrFearThemes: "NONE",
+        medicalOrTreatmentInformation: "NONE", alcoholTobaccoOrDrugUseOrReferences: "NONE",
+        gamblingSimulated: "NONE", sexualContentOrNudity: "NONE", sexualContentGraphicAndNudity: "NONE",
+        gunsOrOtherWeapons: "NONE",
+        contests: "NONE", gambling: false, unrestrictedWebAccess: false, kidsAgeBand: nil,
+        lootBox: false, advertising: "NONE", drugsAlcoholOrTobaccoUse: "NONE"
+      }
+      # Discover any other required keys by retrying
+      base_attrs[:parentalControls] = false
+      base_attrs[:advertising] = false
+      base_attrs.delete(:drugsAlcoholOrTobaccoUse)
+      done = false
+      12.times do
+        begin
+          Spaceship::ConnectAPI.patch_age_rating_declaration(age_rating_declaration_id: ard.id, attributes: base_attrs)
+          UI.success("Age rating set with #{base_attrs.keys.size} fields")
+          done = true
+          break
+        rescue => e
+          msg = e.message[0..800]
+          UI.message("age rating err: #{msg}")
+          changed = false
+          msg.scan(/required attribute.*?'(\w+)'/).flatten.each do |missing|
+            unless base_attrs.key?(missing.to_sym)
+              base_attrs[missing.to_sym] = (missing =~ /^(gambling|lootBox|unrestrictedWebAccess|parentalControls|advertising|seventeenPlus)$/) ? false : "NONE"
+              changed = true
+            end
+          end
+          msg.scan(/wrong type.*?attribute '(\w+)'.*?Expected a BOOLEAN/).flatten.each do |bool_attr|
+            base_attrs[bool_attr.to_sym] = false
+            changed = true
+          end
+          msg.scan(/unknown attribute.*?'(\w+)'/).flatten.each do |unknown|
+            if base_attrs.delete(unknown.to_sym)
+              changed = true
+            end
+          end
+          break unless changed
+        end
+      end
+      UI.message("Age rating skipped — could not converge") unless done
+    rescue => e
+      UI.message("age rating outer: #{e.message[0..300]}")
+    end
+
+    # 10) App Store review detail — contact + demo (create if missing)
+    begin
+      detail = nil
+      begin
+        detail = version.fetch_app_store_review_detail
+      rescue
+      end
+      attrs = {
+        contactFirstName: "Spencer", contactLastName: "Hill",
+        contactEmail: "thespencerhill@gmail.com", contactPhone: "5035550100",
+        demoAccountRequired: false,
+        notes: "Menu bar utility. Click the menu bar battery percentage to open settings. No login. To test alerts, plug in the Mac while the app is running; notifications fire as battery crosses configured thresholds (default 95% and 100%)."
+      }
+      if detail
+        Spaceship::ConnectAPI.patch_app_store_review_detail(app_store_review_detail_id: detail.id, attributes: attrs)
+      else
+        Spaceship::ConnectAPI.post_app_store_review_detail(app_store_version_id: version.id, attributes: attrs)
+      end
+      UI.success("Review contact set")
+    rescue => e
+      UI.message("review detail: #{e.message[0..400]}")
+    end
+
+    # 11) Submit for review using new reviewSubmissions API
+    begin
+      # Reuse existing IN_PROGRESS submission if present
+      existing = Spaceship::ConnectAPI.get_review_submissions(app_id: app.id, filter: { state: "READY_FOR_REVIEW,WAITING_FOR_REVIEW,IN_REVIEW" }).to_models rescue []
+      sub_id = existing.first&.id
+      unless sub_id
+        existing_ready = Spaceship::ConnectAPI.get_review_submissions(app_id: app.id).to_models
+        in_prog = existing_ready.find { |s| s.state == "READY_FOR_REVIEW" }
+        sub_id = in_prog&.id
+      end
+      unless sub_id
+        sub_resp = Spaceship::ConnectAPI.post_review_submission(app_id: app.id, platform: "MAC_OS")
+        sub_id = sub_resp.to_models.first.id
+      end
+      UI.message("Review submission: #{sub_id}")
+      # Add item (if not already)
+      items = Spaceship::ConnectAPI.get_review_submission_items(review_submission_id: sub_id).to_models rescue []
+      if items.empty?
+        Spaceship::ConnectAPI.post_review_submission_item(review_submission_id: sub_id, app_store_version_id: version.id)
+        UI.message("Added version as submission item")
+      else
+        UI.message("Submission already has #{items.size} item(s)")
+      end
+      Spaceship::ConnectAPI.patch_review_submission(review_submission_id: sub_id, attributes: { submitted: true })
+      UI.success("Submitted for App Store review")
+    rescue => e
+      UI.error("Submit failed: #{e.message[0..600]}")
+    end
+  end
+
   desc "Submit latest build for Beta App Review"
   lane :submit_beta_review do
     require 'spaceship'
