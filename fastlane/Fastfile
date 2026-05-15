@@ -620,6 +620,74 @@ platform :mac do
   end
 
   desc "Build and upload to TestFlight"
+  desc "Register widget bundle ID + App Group capability via ConnectAPI (one-time)"
+  lane :setup_widget_capabilities do
+    require 'spaceship'
+    token = Spaceship::ConnectAPI::Token.create(
+      key_id: "XG3FW9LT9Q",
+      issuer_id: "178bab61-1c45-4f62-9525-55f8ed15a98d",
+      filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_XG3FW9LT9Q.p8")
+    )
+    Spaceship::ConnectAPI.token = token
+
+    widget_bid = "com.spencerhill.fullbatteryalert.widgets"
+    main_bid   = "com.spencerhill.fullbatteryalert"
+    group_id   = "group.com.spencerhill.fullbatteryalert"
+
+    # 1) Ensure widget bundle ID exists
+    widget = Spaceship::ConnectAPI::BundleId.all(filter: { identifier: widget_bid }).first
+    if widget.nil?
+      UI.message("Creating widget bundle ID")
+      widget = Spaceship::ConnectAPI::BundleId.create(
+        name: "Battery Charged Widgets",
+        platform: Spaceship::ConnectAPI::BundleIdPlatform::MAC_OS,
+        identifier: widget_bid
+      )
+    end
+    main = Spaceship::ConnectAPI::BundleId.all(filter: { identifier: main_bid }).first
+    raise "Main bundle id #{main_bid} not found" unless main
+
+    # 2) Create the App Group via raw ConnectAPI POST (no first-class helper)
+    client = Spaceship::ConnectAPI.client
+    groups_resp = client.get("appGroups", { "filter[identifier]" => group_id })
+    group = groups_resp.to_models.first rescue nil
+    if group.nil?
+      UI.message("Creating App Group #{group_id}")
+      body = {
+        data: {
+          type: "appGroups",
+          attributes: { identifier: group_id, name: "Battery Charged App Group" }
+        }
+      }
+      created = client.post("appGroups", body)
+      group = created.to_models.first
+    end
+    group_resource_id = group.respond_to?(:id) ? group.id : group["id"]
+    UI.message("App Group resource id: #{group_resource_id}")
+
+    # 3) Enable App Groups capability on both bundle ids
+    [main, widget].each do |bid|
+      caps = Spaceship::ConnectAPI::BundleIdCapability.all(filter: { bundleId: bid.id })
+      has_group = caps.any? { |c| c.capability_type == Spaceship::ConnectAPI::BundleIdCapability::Type::APP_GROUPS }
+      unless has_group
+        UI.message("Enabling APP_GROUPS on #{bid.identifier}")
+        Spaceship::ConnectAPI::BundleIdCapability.create(
+          bundle_id_id: bid.id,
+          capability_type: Spaceship::ConnectAPI::BundleIdCapability::Type::APP_GROUPS
+        )
+      end
+      # 4) Associate the app group with this bundle id (POST relationship)
+      rel_body = { data: [ { type: "appGroups", id: group_resource_id } ] }
+      begin
+        client.patch("bundleIds/#{bid.id}/relationships/appGroups", rel_body)
+        UI.success("Associated #{group_id} with #{bid.identifier}")
+      rescue => e
+        UI.message("association error for #{bid.identifier}: #{e.message[0..400]}")
+      end
+    end
+    UI.success("Setup complete")
+  end
+
   lane :beta do
     api_key = API_KEY.call
     get_certificates(
