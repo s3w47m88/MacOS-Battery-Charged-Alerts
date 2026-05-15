@@ -18,6 +18,15 @@ final class BatteryMonitor: ObservableObject {
     @Published private(set) var amperage: Double? = nil
     /// Power flow in watts (voltage × amperage), signed like amperage.
     @Published private(set) var wattage: Double? = nil
+    /// Charge cycles reported by AppleSmartBattery.
+    @Published private(set) var cycleCount: Int? = nil
+    /// Battery health as MaxCapacity / DesignCapacity, in percent (0–100).
+    @Published private(set) var healthPercent: Int? = nil
+    /// Projected date the battery will reach `maxCycles`, based on observed cycle rate.
+    @Published private(set) var estimatedReplacementDate: Date? = nil
+
+    /// Apple's rated cycle count for modern Mac notebook batteries.
+    static let maxCycles: Int = 1000
 
     private var smartBatteryRefreshTimer: Timer?
 
@@ -114,6 +123,57 @@ final class BatteryMonitor: ObservableObject {
         if voltage != newVoltage { voltage = newVoltage }
         if amperage != newAmperage { amperage = newAmperage }
         if wattage != newWattage { wattage = newWattage }
+
+        let newCycles = readNumber(service: service, key: "CycleCount").map { Int($0) }
+        let design = readNumber(service: service, key: "DesignCapacity").map { Int($0) }
+        let maxCap = (readNumber(service: service, key: "AppleRawMaxCapacity")
+            ?? readNumber(service: service, key: "MaxCapacity")
+            ?? readNumber(service: service, key: "NominalChargeCapacity")).map { Int($0) }
+
+        let newHealth: Int? = {
+            guard let d = design, d > 0, let m = maxCap else { return nil }
+            return Int(round(Double(m) / Double(d) * 100.0))
+        }()
+
+        if cycleCount != newCycles { cycleCount = newCycles }
+        if healthPercent != newHealth { healthPercent = newHealth }
+
+        if let c = newCycles {
+            updateReplacementEstimate(currentCycles: c)
+        }
+    }
+
+    private func updateReplacementEstimate(currentCycles: Int) {
+        let defaults = UserDefaults.standard
+        let baselineKey = "batteryBaselineCycles"
+        let baselineDateKey = "batteryBaselineDate"
+
+        let storedBaseline = defaults.object(forKey: baselineKey) as? Int
+        let storedDate = defaults.object(forKey: baselineDateKey) as? Date
+
+        guard let baseline = storedBaseline, let date = storedDate, currentCycles >= baseline else {
+            // First run, or the battery was replaced (cycles went down). Reset baseline.
+            defaults.set(currentCycles, forKey: baselineKey)
+            defaults.set(Date(), forKey: baselineDateKey)
+            estimatedReplacementDate = nil
+            return
+        }
+
+        let elapsed = Date().timeIntervalSince(date)
+        let cyclesUsed = currentCycles - baseline
+        // Need at least a day of observation and at least 1 cycle to project meaningfully.
+        guard elapsed >= 86_400, cyclesUsed >= 1 else {
+            estimatedReplacementDate = nil
+            return
+        }
+        let cyclesPerSecond = Double(cyclesUsed) / elapsed
+        let remaining = Double(BatteryMonitor.maxCycles - currentCycles)
+        guard remaining > 0, cyclesPerSecond > 0 else {
+            estimatedReplacementDate = Date()
+            return
+        }
+        let secondsLeft = remaining / cyclesPerSecond
+        estimatedReplacementDate = Date().addingTimeInterval(secondsLeft)
     }
 
     private func readNumber(service: io_service_t, key: String) -> Int64? {

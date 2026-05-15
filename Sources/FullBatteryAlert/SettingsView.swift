@@ -35,6 +35,33 @@ struct SettingsView: View {
 
             Divider()
 
+            Text("Battery Health").font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("Cycle Count")
+                    Spacer()
+                    Text(battery.cycleCount.map { "\($0) / \(BatteryMonitor.maxCycles)" } ?? "—")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Health")
+                    Spacer()
+                    Text(battery.healthPercent.map { "\($0)%" } ?? "—")
+                        .monospacedDigit()
+                        .foregroundStyle(healthColor(battery.healthPercent))
+                }
+                HStack {
+                    Text("Est. Replacement")
+                    Spacer()
+                    Text(replacementText)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.callout)
+
+            Divider()
+
             Text("Energy Mode").font(.subheadline.weight(.semibold))
             HStack(spacing: 8) {
                 Image(systemName: battery.isLowPowerMode ? "battery.25percent" : "battery.100percent")
@@ -223,6 +250,33 @@ struct SettingsView: View {
         let volts = String(format: "%.2f V", v)
         let amps = String(format: "%.2f A", abs(a))
         return "\(label): \(watts) (\(volts) · \(amps))"
+    }
+
+    private var replacementText: String {
+        guard let date = battery.estimatedReplacementDate else {
+            return "Gathering data…"
+        }
+        if date <= Date() { return "Now" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        let when = formatter.string(from: date)
+        let years = date.timeIntervalSinceNow / (365.25 * 86_400)
+        let suffix: String
+        if years >= 1 {
+            suffix = String(format: " (~%.1f yr)", years)
+        } else {
+            let months = years * 12
+            suffix = String(format: " (~%.0f mo)", max(months, 1))
+        }
+        return when + suffix
+    }
+
+    private func healthColor(_ pct: Int?) -> Color {
+        guard let p = pct else { return .secondary }
+        if p >= 80 { return .green }
+        if p >= 60 { return .yellow }
+        return .red
     }
 
     private func formatMinutes(_ m: Int) -> String {
