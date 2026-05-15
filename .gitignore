@@ -10,3 +10,4 @@ fastlane/certs/
 fastlane/profiles/
 fastlane/report.xml
 fastlane/README.md
+.claude/scheduled_tasks.lock

@@ -278,7 +278,7 @@ platform :mac do
     begin
       Spaceship::ConnectAPI.post_beta_app_localizations(app_id: app.id, attributes: {
         locale: "en-US",
-        description: "A tiny menu bar app that alerts you when your Mac's battery hits configurable thresholds (default 95% and 100%) so you never overcharge while plugged in.",
+        description: "Ever have to move from your ergonomic work position just to charge your MacBook? Then get so focused on your work you forget to check if the charge is done so you could return? And, instead your neck and back pain is what reminds you x hours after it was fully charged?! Yeah. This app notifies you when you reach X% so you can quickly get back to that comfortable workstation the second it's ready! You can set multiple reminders at any percent you want, and it shows lots of stats for your battery usage and health.",
         feedbackEmail: "thespencerhill@gmail.com",
         marketingUrl: nil,
         privacyPolicyUrl: nil,
