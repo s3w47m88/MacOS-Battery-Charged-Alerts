@@ -87,7 +87,7 @@ struct SettingsView: View {
             .padding(16)
             .frame(width: 340)
         }
-        .frame(width: 340, height: 480)
+        .frame(width: 340, height: AccordionSectionConfig.forceOpen == nil ? 480 : nil)
         .onAppear { stats.start() }
         .onDisappear { stats.stop() }
     }

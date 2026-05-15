@@ -4,6 +4,13 @@ import AppKit
 @MainActor
 enum ScreenshotRenderer {
     static func render(settings: AppSettings, battery: BatteryMonitor, energy: EnergyMonitor, to path: String) {
+        // Optional override: FBA_ACCORDION_STATE=expanded|collapsed forces every
+        // accordion to the given state before the SwiftUI tree reads @AppStorage.
+        if let state = ProcessInfo.processInfo.environment["FBA_ACCORDION_STATE"] {
+            AccordionSectionConfig.forceOpen = (state == "expanded")
+            NSLog("FBA_ACCORDION_STATE=\(state) forceOpen=\(String(describing: AccordionSectionConfig.forceOpen))")
+        }
+
         NSApp.setActivationPolicy(.regular)
         NSApp.appearance = NSAppearance(named: .darkAqua)
 

@@ -758,22 +758,28 @@ platform :mac do
       mac_set = resp.to_models.first
     end
     UI.message("mac set #{mac_set.id}")
-    file = File.expand_path("screenshots/en-US/01-main.png", __dir__)
-    bytes = File.binread(file)
-    resp = Spaceship::ConnectAPI.post_app_screenshot(app_screenshot_set_id: mac_set.id, attributes: { fileName: File.basename(file), fileSize: bytes.bytesize })
-    upload = resp.to_models.first
-    op = upload.upload_operations.first
-    headers = {}
-    op["requestHeaders"].each { |h| headers[h["name"]] = h["value"] }
-    uri = URI(op["url"])
-    http = Net::HTTP.new(uri.host, uri.port); http.use_ssl = (uri.scheme == "https")
-    klass = Net::HTTP.const_get(op["method"].capitalize)
-    req = klass.new(uri.request_uri)
-    headers.each { |k,vv| req[k] = vv }
-    req.body = bytes
-    res = http.request(req)
-    UI.message("upload #{op["method"]} -> #{res.code}")
-    Spaceship::ConnectAPI.patch_app_screenshot(app_screenshot_id: upload.id, source_file_checksum: Digest::MD5.hexdigest(bytes), uploaded: true)
-    UI.success("Uploaded real screenshot to version #{v.version_string}")
+    # Upload every *-store.png in en-US/, in sorted order.
+    files = Dir[File.expand_path("screenshots/en-US/*-store.png", __dir__)].sort
+    if files.empty?
+      files = [File.expand_path("screenshots/en-US/01-main.png", __dir__)]
+    end
+    files.each do |file|
+      bytes = File.binread(file)
+      resp = Spaceship::ConnectAPI.post_app_screenshot(app_screenshot_set_id: mac_set.id, attributes: { fileName: File.basename(file), fileSize: bytes.bytesize })
+      upload = resp.to_models.first
+      op = upload.upload_operations.first
+      headers = {}
+      op["requestHeaders"].each { |h| headers[h["name"]] = h["value"] }
+      uri = URI(op["url"])
+      http = Net::HTTP.new(uri.host, uri.port); http.use_ssl = (uri.scheme == "https")
+      klass = Net::HTTP.const_get(op["method"].capitalize)
+      req = klass.new(uri.request_uri)
+      headers.each { |k,vv| req[k] = vv }
+      req.body = bytes
+      res = http.request(req)
+      UI.message("upload #{File.basename(file)} #{op["method"]} -> #{res.code}")
+      Spaceship::ConnectAPI.patch_app_screenshot(app_screenshot_id: upload.id, source_file_checksum: Digest::MD5.hexdigest(bytes), uploaded: true)
+    end
+    UI.success("Uploaded #{files.size} screenshot(s) to version #{v.version_string}")
   end
 end

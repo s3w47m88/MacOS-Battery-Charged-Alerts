@@ -1,6 +1,13 @@
 import SwiftUI
 
 struct AccordionSection<Content: View>: View {
+    /// Screenshot-mode global override. When non-nil, ALL AccordionSection
+    /// instances render with this open state regardless of @AppStorage.
+    nonisolated(unsafe) static var screenshotForceOpen: Bool? {
+        get { _screenshotForceOpen }
+        set { _screenshotForceOpen = newValue }
+    }
+
     let id: String
     let title: String
     @ViewBuilder var content: () -> Content
@@ -14,6 +21,10 @@ struct AccordionSection<Content: View>: View {
         self._isOpen = AppStorage(wrappedValue: defaultOpen, "accordion.\(id).open")
     }
 
+    private var effectiveOpen: Bool {
+        AccordionSectionConfig.forceOpen ?? isOpen
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -23,7 +34,7 @@ struct AccordionSection<Content: View>: View {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .rotationEffect(.degrees(effectiveOpen ? 90 : 0))
                     Text(title).font(.subheadline.weight(.semibold))
                     Spacer()
                 }
@@ -31,11 +42,20 @@ struct AccordionSection<Content: View>: View {
             }
             .buttonStyle(.plain)
 
-            if isOpen {
+            if effectiveOpen {
                 content()
                     .padding(.leading, 14)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+    }
+}
+
+// Plain global (read once per render) — avoids actor-isolation friction.
+nonisolated(unsafe) private var _screenshotForceOpen: Bool? = nil
+enum AccordionSectionConfig {
+    nonisolated(unsafe) static var forceOpen: Bool? {
+        get { _screenshotForceOpen }
+        set { _screenshotForceOpen = newValue }
     }
 }
