@@ -23,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsCancellable: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let outPath = ProcessInfo.processInfo.environment["FBA_SCREENSHOT_OUT"] {
+            ScreenshotRenderer.render(
+                settings: settings, battery: battery, energy: energy, to: outPath
+            )
+            return
+        }
         NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         setupPopovers()
