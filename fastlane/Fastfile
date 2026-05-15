@@ -656,4 +656,56 @@ platform :mac do
       skip_waiting_for_build_processing: true
     )
   end
+
+  desc 'Upload screenshots to editable App Store version'
+  lane :upload_screenshots do
+    require 'spaceship'
+    require 'digest'
+    require 'net/http'
+    token = Spaceship::ConnectAPI::Token.create(key_id: "XG3FW9LT9Q", issuer_id: "178bab61-1c45-4f62-9525-55f8ed15a98d", filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_XG3FW9LT9Q.p8"))
+    Spaceship::ConnectAPI.token = token
+    app = Spaceship::ConnectAPI::App.find("com.spencerhill.fullbatteryalert")
+    v = app.get_edit_app_store_version(platform: "MAC_OS") || app.get_latest_app_store_version(platform: "MAC_OS")
+    UI.message("version=#{v.version_string} state=#{v.app_store_state}")
+    locs = Spaceship::ConnectAPI.get_app_store_version_localizations(app_store_version_id: v.id).to_models
+    en = locs.find { |l| l.locale == "en-US" }
+    UI.message("localization=#{en.id}")
+    existing_sets = Spaceship::ConnectAPI.get_app_screenshot_sets(app_store_version_localization_id: en.id).to_models
+    UI.message("existing sets: #{existing_sets.size}")
+    desktop_sets = existing_sets.select { |s| s.screenshot_display_type == "APP_DESKTOP" }
+    desktop_sets.each do |set|
+      shots = Spaceship::ConnectAPI.get_app_screenshots(filter: { appScreenshotSet: set.id }).to_models rescue []
+      shots.each do |s|
+        begin
+          Spaceship::ConnectAPI.delete_app_screenshot(app_screenshot_id: s.id)
+          UI.message("deleted screenshot #{s.id}")
+        rescue => e
+          UI.message("del fail: #{e.message[0..200]}")
+        end
+      end
+    end
+    mac_set = desktop_sets.first
+    if mac_set.nil?
+      resp = Spaceship::ConnectAPI.post_app_screenshot_set(app_store_version_localization_id: en.id, attributes: { screenshotDisplayType: "APP_DESKTOP" })
+      mac_set = resp.to_models.first
+    end
+    UI.message("mac set #{mac_set.id}")
+    file = File.expand_path("screenshots/en-US/01-main.png", __dir__)
+    bytes = File.binread(file)
+    resp = Spaceship::ConnectAPI.post_app_screenshot(app_screenshot_set_id: mac_set.id, attributes: { fileName: File.basename(file), fileSize: bytes.bytesize })
+    upload = resp.to_models.first
+    op = upload.upload_operations.first
+    headers = {}
+    op["requestHeaders"].each { |h| headers[h["name"]] = h["value"] }
+    uri = URI(op["url"])
+    http = Net::HTTP.new(uri.host, uri.port); http.use_ssl = (uri.scheme == "https")
+    klass = Net::HTTP.const_get(op["method"].capitalize)
+    req = klass.new(uri.request_uri)
+    headers.each { |k,vv| req[k] = vv }
+    req.body = bytes
+    res = http.request(req)
+    UI.message("upload #{op["method"]} -> #{res.code}")
+    Spaceship::ConnectAPI.patch_app_screenshot(app_screenshot_id: upload.id, source_file_checksum: Digest::MD5.hexdigest(bytes), uploaded: true)
+    UI.success("Uploaded real screenshot to version #{v.version_string}")
+  end
 end
