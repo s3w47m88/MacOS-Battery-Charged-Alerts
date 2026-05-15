@@ -274,16 +274,25 @@ platform :mac do
     app = Spaceship::ConnectAPI::App.find("com.spencerhill.fullbatteryalert")
     build = Spaceship::ConnectAPI::Build.all(app_id: app.id, sort: "-uploadedDate", limit: 1).first
     UI.message("Submitting build #{build.version} for beta review")
-    # Beta app localization (description, feedback email)
+    # Beta app localization (description, feedback email) — upsert
+    beta_desc = "Ever have to move from your ergonomic work position just to charge your MacBook? Then get so focused on your work you forget to check if the charge is done so you could return? And, instead your neck and back pain is what reminds you x hours after it was fully charged?! Yeah. This app notifies you when you reach X% so you can quickly get back to that comfortable workstation the second it's ready! You can set multiple reminders at any percent you want, and it shows lots of stats for your battery usage and health."
     begin
-      Spaceship::ConnectAPI.post_beta_app_localizations(app_id: app.id, attributes: {
-        locale: "en-US",
-        description: "Ever have to move from your ergonomic work position just to charge your MacBook? Then get so focused on your work you forget to check if the charge is done so you could return? And, instead your neck and back pain is what reminds you x hours after it was fully charged?! Yeah. This app notifies you when you reach X% so you can quickly get back to that comfortable workstation the second it's ready! You can set multiple reminders at any percent you want, and it shows lots of stats for your battery usage and health.",
-        feedbackEmail: "thespencerhill@gmail.com",
-        marketingUrl: nil,
-        privacyPolicyUrl: nil,
-        tvOsPrivacyPolicy: nil
-      })
+      existing = Spaceship::ConnectAPI.get_beta_app_localizations(filter: { app: app.id }).to_models
+      en_existing = existing.find { |l| l.locale == "en-US" }
+      if en_existing
+        Spaceship::ConnectAPI.patch_beta_app_localizations(localization_id: en_existing.id, attributes: {
+          description: beta_desc,
+          feedbackEmail: "thespencerhill@gmail.com"
+        })
+        UI.success("Updated existing beta app localization")
+      else
+        Spaceship::ConnectAPI.post_beta_app_localizations(app_id: app.id, attributes: {
+          locale: "en-US",
+          description: beta_desc,
+          feedbackEmail: "thespencerhill@gmail.com"
+        })
+        UI.success("Created beta app localization")
+      end
     rescue => e
       UI.message("beta app localization: #{e.message}")
     end
